@@ -13,7 +13,7 @@ to convert the NCDR production into its own data tables used for
 reporting. The data cleaning steps described below are based on these
 BMC2-specific data tables, which cannot be shared due to considerations
 of data licensing and patient privacy. The cleaning steps are included
-to provide transparency in coding decisions but cannot be applied to
+to provide transparency in coding decisions but cannot be applied
 directly to NCDR data productions.
 
 Read in the data.
