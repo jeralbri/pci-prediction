@@ -1,0 +1,933 @@
+---
+title: "Analysis"
+author: "Jeremy Albright"
+date: '`r format(Sys.Date(), "%b %d, %Y")`'
+output: github_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#devtools::install_github("MethodsConsultants/tibbletest")
+library(tidyverse)
+library(knitr)
+library(VIM)
+library(caret)
+library(doParallel)
+
+source("functions.R")
+
+```
+
+## Preliminaries
+
+This git repository contains the code used to prepare the data for the xgboost models and validate the predictions. The data for Michigan hospitals were provided to BMC2 by the National Cardiovascular Data Registry (NCDR) from their CathPCI registry. BMC2 runs its own scripts to convert the NCDR production into its own data tables used for reporting. The data cleaning steps described below are based on these BMC2-specific data tables, which cannot be shared due to considerations of data licensing and patient privacy. The cleaning steps are included to provide transparency in coding decisions but cannot be applied to directly to NCDR data productions.
+
+Read in the data.
+
+```{r}
+
+tbl <- readRDS("../bmc2-joined-pci-data.rds")
+
+```
+
+
+## Data Cleaning
+
+```{r}
+
+tbl <- tbl %>% 
+  mutate(
+    across(
+      c(dyslipidemia, family_hx_cad, current_dialysis, prior_pci, prior_cabg,
+        prior_cvd, hxcld, hxmi, prior_pad, hxdiab, tobaccouse, tobaccotype, 
+        tobaccoamt, caouthospital, cawitness, capostems, initcarhythm, 
+        cshascale, stress_imaging, stress_echo_result, exercise_stress_test_result,
+        stress_image_cmr_result, stress_nuclear_result, stress_echo_risk,
+        exercise_stress_test_risk, stress_image_cmr_risk, stress_nuclear_risk,
+        nvstenosis, diagcorangio, status, mvd, thrombolytics, syntaxscore,
+        pci_delay_reason, hxhf, priornyha, hfnewdiag, hftype, cardiaccta,
+        cardiacctares, priordxangioproc, priordxangiores, leftheartcath, cainhosp, cvinstability,
+        valvdst1,  valvdst2, valvdst3, valvdst4, stensev1, stensev2, stensev3,
+        stensev4, valvdrt1, valvdrt2, valvdrt3, valvdrt4, regusev1, regusev2,
+        regusev3, regusev4, preopeval, funccapacity, funccapacityunk, surgrisk,
+        organtransplantsurg, field_d_afib_value, field_d_diabetes_tx_value,
+        cardiac_arrest_any, CA_level_of_consciousness),
+      ~na_if(.x, "NA")
+    )
+  )
+
+
+#-------- Height and weight
+tbl <- tbl %>% 
+  mutate(
+    height_NA = as.integer(is.na(height)),
+    weight_NA = as.integer(is.na(weight))
+  ) %>% 
+  mutate(
+    height = as.numeric(height),
+    weight = as.numeric(weight)
+  )
+
+
+#------ Ventricular Support
+tbl <- tbl %>% 
+  mutate(
+    ventricular_support = case_when(
+      !vasopressor_support & !mechanical_support ~ 0L,
+      !vasopressor_support & mechanical_support  ~ 1L,
+      vasopressor_support  & !mechanical_support ~ 2L,
+      TRUE                                       ~ 3L
+    ) %>% factor(levels = 0:3, labels = c("No Ventricular Support or Unknown",
+                                          "Mechanical Support",
+                                          "Vasopressor Support",
+                                          "Both Mechanical and Vasopressor Support"))
+  )
+
+
+#-------- Collapse cshascale
+tbl <- tbl %>% 
+  dplyr::rename(
+    cshascale_old = cshascale
+  ) %>% 
+  mutate(
+    cshascale = case_when(
+      str_detect(cshascale_old, "1|2") ~ "1-2: Very Fit or Well",
+      str_detect(cshascale_old, "3")   ~ "3: Managing Well",
+      str_detect(cshascale_old, "4")   ~ "4: Vulnerable",
+      str_detect(cshascale_old, "5")   ~ "5: Mildly Frail",
+      str_detect(cshascale_old, "6")   ~ "6: Moderately Frail",
+      str_detect(cshascale_old, "7")   ~ "7: Severely Frail",
+      str_detect(cshascale_old, "8|9") ~ "8-9: Very Sev. Frail or Terminally Ill",
+      TRUE                             ~ NA_character_
+    ) %>% as.factor()
+  )
+
+
+#-------- Clean up Status
+tbl <- tbl %>% 
+  rename(
+    status_old = status
+  ) %>% 
+  mutate(
+    status = case_when(
+      status_old == "elective" ~ 0L,
+      status_old == "emergent" ~ 1L,
+      status_old == "urgent"   ~ 2L,
+      status_old == "salvage"  ~ 3L,
+      TRUE                 ~ NA_integer_
+    ) %>% 
+      factor(levels = 0:3, labels = c("Elective",
+                                      "Emergent",
+                                      "Urgent",
+                                      "Salvage"))
+  )
+
+
+#-------- Clean Diabetes
+tbl <- tbl %>% 
+  mutate(
+    diab_tx = case_when(
+      field_d_diabetes_tx_value == "No DM" ~ 0L,
+      field_d_diabetes_tx_value == "IDDM"  ~ 1L,
+      field_d_diabetes_tx_value == "NIDDM" ~ 2L,
+      TRUE ~ NA_integer_
+  ) %>% factor(levels = 0:2, labels = c("No Diabetes", "Diabetes - IDDM", "Diabetes - NIDDM"))
+)
+
+
+#-------- Differentiate missing NYHA from no prior heart failure
+tbl <- tbl %>% 
+  dplyr::rename(
+    priornyha_old = priornyha
+  ) %>% 
+  mutate(
+    priornyha = case_when(
+      hxhf == "0"                         ~ "No Hx Heart Failure",
+      hxhf == "1" & !is.na(priornyha_old) ~ as.character(priornyha_old),
+      TRUE                                ~ NA_character_
+    ) %>% factor(levels = c("No Hx Heart Failure",
+                            "Class I",
+                            "Class II",
+                            "Class III",
+                            "Class IV"))
+  ) 
+
+
+#-------- Differentiate missing type from no hx heart failure
+tbl <- tbl %>% 
+  dplyr::rename(
+    hftype_old = hftype
+  ) %>% 
+  mutate(
+    hftype = case_when(
+      hxhf == "0"                      ~"No Hx Heart Failure",
+      hxhf == "1" & !is.na(hftype_old) ~ as.character(hftype_old),
+      hxhf == "1"                      ~ "Heart Failure Type Not Documented",
+      TRUE                             ~ NA_character_
+    ) %>% factor(levels = c("No Hx Heart Failure",
+                            "Diastolic heart failure",
+                            "Systolic Heart Failure",
+                            "Heart Failure Type Not Documented"))
+  )
+
+
+#-------- Tobacco Use and Amount
+tbl <- tbl %>% 
+  dplyr::rename(
+    tobaccouse_old = tobaccouse
+  ) %>% 
+  mutate(
+    tobaccouse = case_when(
+      str_detect(tobaccouse_old, "every") & str_detect(tobaccoamt, "Heavy") ~ "Current Every Day User",
+      str_detect(tobaccouse_old, "every") & str_detect(tobaccoamt, "Light") ~ "Current Every Day User",
+      str_detect(tobaccouse_old, "every")                                   ~ "Current Every Day User",
+      str_detect(tobaccouse_old, "some day")                                ~ "Current Some Day User",
+      str_detect(tobaccouse_old, "Former")                                  ~ "Former User",
+      str_detect(tobaccouse_old, "Never")                                   ~ "Never Used Tobacco",
+      TRUE                                                                  ~ NA_character_
+    ) %>% factor(levels = c("Never Used Tobacco",
+                            "Former User",
+                            "Current Some Day User",
+                            "Current Every Day User"))
+  )
+
+
+#-------- Collapse PCI Indication
+tbl <- tbl %>% 
+  dplyr::rename(
+    pci_indication_old = pci_indication
+  ) %>% 
+  mutate(
+    pci_indication = case_when(
+      str_detect(pci_indication_old, "STEMI") ~ "STEMI",
+      pci_indication_old == "NA"              ~ NA_character_,
+      TRUE                                    ~ as.character(pci_indication_old)
+    ) %>% as.factor()
+  ) 
+
+
+#-------- Cardiogenic Shock
+tbl <- tbl %>% 
+  mutate(
+    cardiogenic_shock = case_when(
+      str_detect(cvinstabilitytype, "Cardiogenic Shock") ~ 1L,
+      TRUE ~ 0L)
+  )
+
+
+#-------- Stress Imaging: Differentiate Missing from No Test.
+tbl <- tbl %>% 
+  dplyr::rename(
+    stress_imaging_old = stress_imaging,
+    stresstest_old     = stresstest
+  ) %>% 
+  mutate(
+    stress_imaging = case_when(
+      stresstest_old == "0" & is.na(stress_imaging_old) ~ "No Stress Testing",
+      stresstest_old == "1" & is.na(stress_imaging_old) ~ "Stress Test: No Imaging Recorded",
+      stresstest_old == "1" & stress_imaging_old == "1" ~ "Stress Test Imaging",
+      TRUE                                              ~ NA_character_
+    ) %>% as.factor()
+  )
+
+
+#-------- Collapse Stress Tests.
+
+tbl <- tbl %>% 
+  mutate(
+    stresstest = case_when(
+      stresstest_old == "0"       ~ "No Stress Test",
+      stress_echo == "1"          ~ "Stress Echocardiogram",
+      exercise_stress_test == "1" ~ "Exercise Stress Test",
+      stress_nuclear == "1"       ~ "Stress Nuclear",
+      stress_image_cmr == "1"     ~ "Stress Image CMR",
+      stresstest_old == "1"       ~ "Stress Test (Type Not Indicated)",
+      TRUE                        ~ NA_character_
+    ) %>% factor(levels = c("No Stress Test",
+                            "Exercise Stress Test",
+                            "Stress Echocardiogram",
+                            "Stress Image CMR",
+                            "Stress Nuclear",
+                            "Stress Test (Type Not Indicated)"))
+  )
+
+#-------- Collapse Stress Test Results.
+tbl <- tbl %>% 
+  mutate(
+    stress_test_result = case_when(
+      stresstest_old == "0"               ~ "No Stress Testing",
+      !is.na(stress_echo_result)          ~ as.character(stress_echo_result),
+      !is.na(exercise_stress_test_result) ~ as.character(exercise_stress_test_result),
+      !is.na(stress_image_cmr_result)     ~ as.character(stress_image_cmr_result),
+      !is.na(stress_nuclear_result)       ~ as.character(stress_nuclear_result),
+      stresstest_old == "1"               ~ "Unavailable",
+      TRUE                                ~ NA_character_
+    ) %>% factor(levels = c("No Stress Testing",
+                            "Negative",
+                            "Positive",
+                            "Indeterminate",
+                            "Unavailable"))
+  )
+
+
+#-------- Collapse Stress Test Risk.
+tbl <- tbl %>% 
+  mutate(
+    stress_test_risk = case_when(
+      stresstest_old == "0"             ~ "No Stress Testing",
+      !is.na(stress_echo_risk)          ~ as.character(stress_echo_risk),
+      !is.na(exercise_stress_test_risk) ~ as.character(exercise_stress_test_risk),
+      !is.na(stress_image_cmr_risk)     ~ as.character(stress_image_cmr_risk),
+      !is.na(stress_nuclear_risk)       ~ as.character(stress_nuclear_risk),
+      stresstest_old == "1"             ~ "Unavailable",
+      TRUE                              ~ NA_character_
+    ) %>% factor(levels = c("No Stress Testing",
+                            "Low Risk of Ischemia",
+                            "Intermediate Risk of Ischemia",
+                            "High",
+                            "Unavailable"))
+  )
+
+#-------- Update stress_test_result
+tbl <- tbl %>%
+  rename(
+    stress_test_result_old = stress_test_result
+  ) %>% 
+  mutate(
+    stress_test_result = case_when(
+      stress_test_result_old == "No Stress Testing" ~ "No Stress Testing",
+      stress_test_result_old == "Negative" ~ "Negative",
+      stress_test_result_old == "Positive" & stress_test_risk == "Low Risk of Ischemia" ~ "Positive - Low Risk of Ischemia",
+      stress_test_result_old == "Positive" & stress_test_risk == "Intermediate Risk of Ischemia" ~ "Positive - Intermediate Risk of Ischemia",
+      stress_test_result_old == "Positive" & stress_test_risk == "High" ~ "Positive - High Risk of Ischemia",
+      stress_test_result_old == "Positive" ~ "Positive - Risk Unknown",
+      stress_test_result_old %in% c("Indeterminate", "Unavailable") ~ "Indeterminate/Unavailable",
+      TRUE ~ NA_character_
+    ) %>% factor(
+    levels = c("No Stress Testing",
+               "Negative",
+               "Positive - Low Risk of Ischemia",
+               "Positive - Intermediate Risk of Ischemia",
+               "Positive - High Risk of Ischemia",
+               "Positive - Risk Unknown",
+               "Indeterminate/Unavailable")
+  )
+)
+
+
+#------ Race
+tbl <- tbl %>% 
+  mutate(
+    race = case_when(
+    White == 1 & `Black/African American` == 0 & Asian == 0 ~ 0L,
+    White == 0 & `Black/African American` == 1 & Asian == 0 ~ 1L,
+    White == 0 & `Black/African American` == 0 & Asian == 1 ~ 2L,
+    !is.na(White) & !is.na(`Black/African American`) & !is.na(Asian) ~ 3L,
+    TRUE ~ 4L
+    ) %>% factor(levels = 0:4,labels = c("White", "Black/African American", "Asian", "Other or Multiple Races", "NA"))
+  ) 
+
+
+#------ Convert to Numeric
+tbl <- tbl %>%  
+  mutate(
+    across(c(preproctni, lipidshdl, lipidstc, procsystolicbp, hgb, preproccreat), as.numeric)
+  ) %>% 
+  mutate(
+    across(c(chronic_lung_dx, prior_pci, prior_cabg, prior_pad, hypertension, dyslipidemia,
+             cvinstability, hxmi, leftheartcath, prior_cvd), as.integer)
+  ) %>% 
+  mutate(
+    across(c(sex, cardiac_arrest_any), as.factor)
+  )
+
+
+#------ New CABG
+tbl <- tbl %>%  
+  mutate(
+    new_cabg = case_when(
+      str_detect(cabgstatus, "CABG") & cabgindication %in% c("PCI Failure", "PCI complication") ~ 1L,
+      TRUE ~ 0L
+    )
+  )
+
+
+#-------- LVEF closes to procedure
+tbl <- tbl %>% 
+  mutate(
+    pre_lvef = case_when(
+      !is.na(prepcilvef)  ~ as.numeric(prepcilvef),
+      !is.na(preproclvef) ~ as.numeric(preproclvef),
+      TRUE ~ NA_real_
+    )
+  ) %>% 
+  mutate(
+    pre_lvef_NA = as.integer(is.na(pre_lvef))
+  )
+
+
+#-------- Additional Missing Flags
+tbl <- tbl %>% 
+  mutate(
+    lipidshdl_NA = as.integer(is.na(lipidshdl)),
+    lipidstc_NA  = as.integer(is.na(lipidstc)),
+    hgb_NA       = as.integer(is.na(hgb)),
+    preproctni_NA = as.integer(is.na(preproctni))
+  ) 
+
+
+#-------- Clean outcomes
+tbl <- tbl %>% 
+  rename(
+    aki_old                = AKI,
+    death_old              = death,
+    any_stroke_old         = any_stroke,
+    ischemic_stroke_old    = ischemic_stroke,
+    hemorrhagic_stroke_old = hemorrhagic_stroke,
+    major_bleeding_old     = major_bleeding,     
+    transfusion_old        = post_trans,
+    nrd_old                = nrd
+  ) %>% 
+  mutate(
+    aki                = as.integer(aki_old),
+    mortality          = as.integer(death_old),
+    any_stroke         = as.integer(any_stroke_old),
+    ischemic_stroke    = as.integer(ischemic_stroke_old),
+    hemorrhagic_stroke = as.integer(hemorrhagic_stroke_old),
+    major_bleeding     = as.integer(major_bleeding_old),
+    transfusion        = as.integer(transfusion_old),
+    nrd                = as.integer(nrd_old)
+  )
+
+
+```
+
+Limit to variables of interest.
+
+```{r}
+
+tbl <- tbl %>%
+  dplyr::select(
+    # Variables used for summary stats only
+    visitoccurrencekey, race, hxmi, prior_pci, prior_cabg, prior_pad, hypertension, dyslipidemia, chronic_lung_dx,
+    contrast_volume, access_site, cardiogenic_shock,
+    # Variables to be kept for model
+    age, height, weight, preproccreat, lipidshdl, lipidshdl_NA, lipidstc, lipidstc_NA,
+    procsystolicbp, hgb_NA, hgb, cvinstability, sex, ventricular_support, cshascale, status,
+    diab_tx, priornyha, hftype, tobaccouse, cardiac_arrest_any, leftheartcath,
+    prior_cvd, pci_indication, cath_lab_indication_1, cath_lab_indication_2, cath_lab_indication_5, 
+    cath_lab_indication_6,cath_lab_indication_7, cath_lab_indication_8, cath_lab_indication_10, 
+    cath_lab_indication_11, cath_lab_indication_13, cath_lab_indication_14, cath_lab_indication_15,
+    stress_test_result, pre_lvef, pre_lvef_NA,  
+    aki, ischemic_stroke, any_stroke, hemorrhagic_stroke, major_bleeding, 
+    transfusion, mortality, nrd, new_cabg) 
+
+```
+
+## Imputation
+
+Now perform kNN imputation (k = 5). AKI has 9.7% missing. Rather than impute, the corresponding analysis will subset to the observed cases. NRD also has missing, and major bleed is missing whenever pre procedure hemoglobin values were missing. Also drop the variables not used in the model. 
+
+Due to the length of time the imputations take, run this chunk once and save the results, then set `eval = F`.
+
+```{r, eval = F}
+
+set.seed(12345)
+
+impute_vars <- colnames(tbl)[!colnames(tbl) %in% c("aki", "nrd", "major_bleeding", "visitoccurencekey")]
+
+tbl_imp <- tbl %>% 
+  kNN(
+    variable = impute_vars,
+    imp_var  = F
+  )
+
+tbl %>% 
+  mutate(
+    across(aki:new_cabg, ~factor(.x, levels = 0:1, labels = c("No", "Yes")))
+  ) %>% 
+  saveRDS(
+    "../reduced-df-all-outcomes.rds"
+  )
+
+tbl_imp %>% 
+  mutate(
+    across(aki:new_cabg, ~factor(.x, levels = 0:1, labels = c("No", "Yes")))
+  ) %>%
+  saveRDS(
+    "../imputed-reduced-df-all-outcomes.rds"
+  )
+
+
+```
+
+```{r}
+
+tbl_imp <- readRDS("../imputed-reduced-df-all-outcomes.rds")
+
+```
+
+## Summary Statistics
+
+Start with features. Use pre-imputed data.
+
+```{r}
+
+features_tbl <- tibbletest::descriptives(
+  tbl, 
+  variables = c(
+    race, hxmi, prior_pci, prior_cabg, prior_pad, hypertension, dyslipidemia, chronic_lung_dx,
+    age, height, weight, preproccreat, lipidshdl, lipidshdl_NA, lipidstc, lipidstc_NA,
+    procsystolicbp, hgb_NA, hgb, cvinstability, sex, ventricular_support, cshascale, status,
+    diab_tx, priornyha, hftype, tobaccouse, cardiac_arrest_any, leftheartcath,
+    prior_cvd, pci_indication, cath_lab_indication_1, cath_lab_indication_2, cath_lab_indication_5, 
+    cath_lab_indication_6,cath_lab_indication_7, cath_lab_indication_8, cath_lab_indication_10, 
+    cath_lab_indication_11, cath_lab_indication_13, cath_lab_indication_14, cath_lab_indication_15,
+    stress_test_result, pre_lvef, pre_lvef_NA)
+) %>% 
+  filter(
+    !Label %in% c("FALSE", "0", "No")
+  ) %>% 
+  var_labels(Variable) %>% 
+  mutate(
+    Label = if_else(Label %in% c("TRUE", "1", "Yes"), "", Label),
+    Variable = if_else(Variable != lag(Variable) | row_number() == 1L, Variable, "")
+  ) 
+
+features_tbl %>% 
+  kable()
+
+
+```
+
+And outcomes.
+
+```{r}
+
+outcomes_tbl <- tibbletest::descriptives(
+  tbl, 
+  variables = c(
+    mortality, aki, ischemic_stroke, any_stroke, hemorrhagic_stroke, major_bleeding, transfusion, nrd, new_cabg)
+) %>% 
+  filter(
+    Label == 1L
+  ) %>% 
+  var_labels(Variable) %>% 
+  mutate(
+    Variable = if_else(Variable != lag(Variable) | row_number() == 1L, Variable, "")
+  ) %>% 
+  select(
+    -Label
+  )
+
+outcomes_tbl %>% 
+  kable()
+
+```
+
+Summarize missing.
+
+```{r}
+
+tbl %>% 
+  select(
+    race, hxmi, prior_pci, prior_cabg, prior_pad, hypertension, dyslipidemia, chronic_lung_dx,
+    age, height, weight, preproccreat, lipidshdl, lipidstc,
+    procsystolicbp, hgb, cvinstability, sex, ventricular_support, cshascale, status,
+    diab_tx, priornyha, hftype, tobaccouse, cardiac_arrest_any, leftheartcath,
+    prior_cvd, pci_indication, cath_lab_indication_1, cath_lab_indication_2, cath_lab_indication_5, 
+    cath_lab_indication_6,cath_lab_indication_7, cath_lab_indication_8, cath_lab_indication_10, 
+    cath_lab_indication_11, cath_lab_indication_13, cath_lab_indication_14, cath_lab_indication_15,
+    stress_test_result, pre_lvef,
+    mortality, aki, ischemic_stroke, any_stroke, hemorrhagic_stroke, major_bleeding, transfusion, nrd, new_cabg
+  ) %>% 
+  map_df(
+    ~sum(is.na(.x))
+  ) %>% 
+  pivot_longer(
+    cols = everything(),
+    values_to = "Count of Missing Values",
+    names_to = "Variable"
+  ) %>% 
+  var_labels(
+    Variable
+  ) %>% 
+  mutate(
+    `Percent Missing` = round(100*`Count of Missing Values`/nrow(tbl),2)
+  ) %>% 
+  kable()
+
+```
+
+
+## Split Data
+
+Create a separate data file for each outcome. This will allow dropping missing on the outcomes and correctly joining in the predictions.
+
+```{r, eval = F}
+
+feature_names <- tbl_imp %>% 
+  dplyr::select(
+    age:pre_lvef_NA
+  ) %>% 
+  colnames()
+
+tbl_mort               <- drop_missing(tbl_imp, "mortality", feature_names)
+tbl_aki                <- drop_missing(tbl_imp, "aki", feature_names)
+tbl_ischemic_stroke    <- drop_missing(tbl_imp, "ischemic_stroke", feature_names)
+tbl_any_stroke         <- drop_missing(tbl_imp, "any_stroke", feature_names)
+tbl_hemorrhagic_stroke <- drop_missing(tbl_imp, "hemorrhagic_stroke", feature_names)
+tbl_major_bleeding     <- drop_missing(tbl_imp, "major_bleeding", feature_names)
+tbl_transfusion        <- drop_missing(tbl_imp, "transfusion", feature_names)
+tbl_nrd                <- drop_missing(tbl_imp, "nrd", feature_names)
+tbl_new_cabg           <- drop_missing(tbl_imp, "new_cabg", feature_names)
+
+```
+
+To keep data training and test data constant, run this code once and save the results, then set `eval = F`.
+
+```{r, eval = F}
+
+split_prop <- 0.60 
+
+set.seed(12345)
+
+mort_split_tbl      <- split_data(tbl_mort, "mortality", prop = split_prop)
+saveRDS(mort_split_tbl, "../mort_split_tbl.rds")
+
+aki_split_tbl       <- split_data(tbl_aki, "aki", prop = split_prop)
+saveRDS(aki_split_tbl, "../aki_split_tbl.rds")
+
+any_strk_split_tbl  <- split_data(tbl_any_stroke, "any_stroke", prop = split_prop)
+saveRDS(any_strk_split_tbl, "../any_strk_split_tbl.rds")
+
+isch_strk_split_tbl <- split_data(tbl_ischemic_stroke, "ischemic_stroke", prop = split_prop)
+saveRDS(isch_strk_split_tbl, "../isch_strk_split_tbl.rds")
+
+hem_strk_split_tbl  <- split_data(tbl_hemorrhagic_stroke, "hemorrhagic_stroke", prop = split_prop)
+saveRDS(hem_strk_split_tbl, "../hem_strk_split_tbl.rds")
+
+maj_bleed_split_tbl <- split_data(tbl_major_bleeding, "major_bleeding", prop = split_prop)
+saveRDS(maj_bleed_split_tbl, "../maj_bleed_split_tbl.rds")
+
+trnf_split_tbl      <- split_data(tbl_transfusion, "transfusion", prop = split_prop)
+saveRDS(trnf_split_tbl, "../trnf_split_tbl.rds")
+
+nrd_split_tbl      <- split_data(tbl_nrd, "nrd", prop = split_prop)
+saveRDS(nrd_split_tbl, "../nrd_split_tbl.rds")
+
+cabg_split_tbl      <- split_data(tbl_new_cabg, "new_cabg", prop = split_prop)
+saveRDS(cabg_split_tbl, "../cabg_split_tbl.rds")
+
+```
+
+Read in saved versions.
+
+```{r}
+
+mort_split_tbl      <- readRDS("../mort_split_tbl.rds")
+aki_split_tbl       <- readRDS("../aki_split_tbl.rds")
+any_strk_split_tbl  <- readRDS("../any_strk_split_tbl.rds")
+isch_strk_split_tbl <- readRDS("../isch_strk_split_tbl.rds")
+hem_strk_split_tbl  <- readRDS("../hem_strk_split_tbl.rds")
+maj_bleed_split_tbl <- readRDS("../maj_bleed_split_tbl.rds")
+trnf_split_tbl      <- readRDS("../trnf_split_tbl.rds")
+nrd_split_tbl       <- readRDS("../nrd_split_tbl.rds")
+cabg_split_tbl      <- readRDS("../cabg_split_tbl.rds")
+
+```
+
+## Number of Events
+
+Get the number of events in each training/testing set.
+
+```{r}
+
+numb_events <- bind_rows(
+  get_n(training(mort_split_tbl), testing(mort_split_tbl), mortality, "Yes", "Mortality"),
+  get_n(training(aki_split_tbl), testing(aki_split_tbl), aki, "Yes", "AKI"),
+  get_n(training(any_strk_split_tbl), testing(any_strk_split_tbl), any_stroke, "Yes", "Any Stroke"),
+  get_n(training(isch_strk_split_tbl), testing(isch_strk_split_tbl), ischemic_stroke, "Yes", "Ischemic Stroke"),
+  get_n(training(hem_strk_split_tbl), testing(hem_strk_split_tbl), hemorrhagic_stroke, "Yes", "Hemorrhagic Stroke"),
+  get_n(training(maj_bleed_split_tbl), testing(maj_bleed_split_tbl), major_bleeding, "Yes", "Major Bleeding"),
+  get_n(training(trnf_split_tbl), testing(trnf_split_tbl), transfusion, "Yes", "Transfusion"),
+  get_n(training(nrd_split_tbl), testing(nrd_split_tbl), nrd, "Yes", "NRD"),
+  get_n(training(cabg_split_tbl), testing(cabg_split_tbl), new_cabg, "Yes", "New CABG")
+)
+
+kable(
+  numb_events
+)
+
+```
+
+
+## Train Models
+
+Tuning was done performed separately on the training sets using repeated three-fold cross-validation on a grid search over candidate hyperparameters. Up-sampling, down-sampling, and SMOTE were all attempted in the grid search, but under and over-sampling did not improve predictions. For concision, the tuning code is elided here. The optimal hyperparameters were similar across outcomes and tended to depend most on `eta`. 
+
+
+```{r}
+
+grid <- list(eta              = 0.01,
+             max_depth        = 4,
+             colsample_bytree = 0.9,
+             subsample        = 0.9,
+             gamma            = 0.075,
+             nrounds          = 750,
+             min_child_weight = 7
+) %>% 
+  as.data.frame()
+
+# method = none means no subsampling.
+train_control <- trainControl(method          = "none",
+                              classProbs      = T, 
+                              summaryFunction = twoClassSummary
+)
+
+```
+ 
+#### Mortality
+
+```{r, eval = F}
+
+mortality_mod <- train_xgboost(training(mort_split_tbl), "mortality")
+saveRDS(mortality_mod, "../mortality.rds")
+
+```
+
+#### AKI
+
+```{r, eval = F}
+
+aki_mod <- train_xgboost(training(aki_split_tbl), "aki")
+saveRDS(aki_mod, "../aki.rds")
+
+```
+
+#### Any Stroke
+
+```{r, eval = F}
+
+any_stroke_mod <- train_xgboost(training(any_strk_split_tbl), "any_stroke")
+saveRDS(any_stroke_mod, "../any_stroke.rds")
+
+```
+
+#### Major Bleeding
+
+```{r, eval = F}
+
+major_bleeding_mod <- train_xgboost(training(maj_bleed_split_tbl), "major_bleeding")
+saveRDS(major_bleeding_mod, "../major_bleeding.rds")
+
+```
+
+#### Transfusion
+
+```{r, eval = F}
+
+transfusion_mod <- train_xgboost(training(trnf_split_tbl), "transfusion")
+saveRDS(transfusion_mod, "../transfusion.rds")
+
+```
+
+#### NRD
+
+```{r, eval = F}
+
+nrd_mod <- train_xgboost(training(nrd_split_tbl), "nrd")
+saveRDS(nrd_mod, "../nrd.rds")
+
+```
+
+#### CABG
+
+```{r, eval = F}
+
+new_cabg_mod <- train_xgboost(training(cabg_split_tbl), "new_cabg")
+saveRDS(new_cabg_mod, "../new_cabg.rds")
+
+```
+
+
+#### Read in Saved Models and Prep for Validation
+
+```{r}
+
+mortality_mod          <- readRDS("../mortality.rds")
+aki_mod                <- readRDS("../aki.rds")
+any_stroke_mod         <- readRDS("../any_stroke.rds")
+major_bleeding_mod     <- readRDS("../major_bleeding.rds")
+transfusion_mod        <- readRDS("../transfusion.rds")
+nrd_mod                <- readRDS("../nrd.rds")
+new_cabg_mod           <- readRDS("../new_cabg.rds")
+
+```
+
+Create a single training dataframe, and a separate single testing dataframe, to facilitate data management.
+
+```{r}
+
+training_tbl_preds <- reduce(list(
+  get_preds(mortality_mod, training(mort_split_tbl)) %>% 
+    select(visitoccurrencekey, mortality, preds_mortality = preds),
+  get_preds(aki_mod, training(aki_split_tbl)) %>% 
+    select(visitoccurrencekey, aki, preds_aki = preds),
+  get_preds(any_stroke_mod, training(any_strk_split_tbl)) %>% 
+    select(visitoccurrencekey, any_stroke, preds_any_stroke = preds),
+  get_preds(major_bleeding_mod, training(maj_bleed_split_tbl)) %>% 
+    select(visitoccurrencekey, major_bleeding, preds_major_bleeding = preds),
+  get_preds(transfusion_mod, training(trnf_split_tbl)) %>% 
+    select(visitoccurrencekey, transfusion, preds_transfusion = preds),
+  get_preds(nrd_mod, training(nrd_split_tbl)) %>% 
+    select(visitoccurrencekey, nrd, preds_nrd = preds),
+  get_preds(new_cabg_mod, training(cabg_split_tbl)) %>% 
+    select(visitoccurrencekey, new_cabg, preds_new_cabg = preds)),
+  full_join, by = "visitoccurrencekey")
+
+
+testing_tbl_preds <- reduce(list(
+  get_preds(mortality_mod, testing(mort_split_tbl)) %>% 
+    select(visitoccurrencekey, mortality, preds_mortality = preds),
+  get_preds(aki_mod, testing(aki_split_tbl)) %>% 
+    select(visitoccurrencekey, aki, preds_aki = preds),
+  get_preds(any_stroke_mod, testing(any_strk_split_tbl)) %>% 
+    select(visitoccurrencekey, any_stroke, preds_any_stroke = preds),
+  get_preds(major_bleeding_mod, testing(maj_bleed_split_tbl)) %>% 
+    select(visitoccurrencekey, major_bleeding, preds_major_bleeding = preds),
+  get_preds(transfusion_mod, testing(trnf_split_tbl)) %>% 
+    select(visitoccurrencekey, transfusion, preds_transfusion = preds),
+  get_preds(nrd_mod, testing(nrd_split_tbl)) %>% 
+    select(visitoccurrencekey, nrd, preds_nrd = preds),
+  get_preds(new_cabg_mod, testing(cabg_split_tbl)) %>% 
+    select(visitoccurrencekey, new_cabg, preds_new_cabg = preds)),
+  full_join, by = "visitoccurrencekey")
+
+
+training_tbl_preds <- training_tbl_preds %>% 
+  left_join(
+    select(tbl_imp, visitoccurrencekey, sex, age, pci_indication, cardiogenic_shock), 
+    by = "visitoccurrencekey"
+  )
+
+testing_tbl_preds <- testing_tbl_preds %>% 
+  left_join(
+    select(tbl_imp, visitoccurrencekey, sex, age, pci_indication, cardiogenic_shock), 
+    by = "visitoccurrencekey"
+  )
+
+```
+
+## AUC
+
+```{r}
+
+roc_ci(testing_tbl_preds, mortality, preds_mortality, "Yes", title = "Mortality")
+
+roc_ci(testing_tbl_preds, aki, preds_aki, "Yes", title = "AKI")
+
+roc_ci(testing_tbl_preds, any_stroke, preds_any_stroke, "Yes", title = "Any Stroke")
+
+roc_ci(testing_tbl_preds, major_bleeding, preds_major_bleeding, "Yes", title = "Major Bleeding")
+
+roc_ci(testing_tbl_preds, transfusion, preds_transfusion, "Yes", title = "Transfusion")
+
+roc_ci(testing_tbl_preds, nrd, preds_nrd, "Yes", title = "NRD")
+
+roc_ci(testing_tbl_preds, new_cabg, preds_new_cabg, "Yes", title = "New CABG")
+
+```
+
+
+## Model Performance by Subgroups
+
+```{r}
+
+testing_n_auc <- bind_rows(
+  auc_by_group(testing_tbl_preds, mortality, preds_mortality, "Yes", title = "Mortality"),
+  auc_by_group(testing_tbl_preds, aki, preds_aki, "Yes", title = "AKI"),
+  auc_by_group(testing_tbl_preds, any_stroke, preds_any_stroke, "Yes", title = "Any Stroke"),
+  auc_by_group(testing_tbl_preds, major_bleeding, preds_major_bleeding, "Yes", title = "Major Bleeding"),
+  auc_by_group(testing_tbl_preds, transfusion, preds_transfusion, "Yes", title = "Transfusion"),
+  auc_by_group(testing_tbl_preds, nrd, preds_nrd, "Yes", title = "NRD"),
+  auc_by_group(testing_tbl_preds, new_cabg, preds_new_cabg, "Yes", title = "New CABG")
+)
+
+testing_n_auc %>% 
+  kable()
+
+```
+
+
+
+## Calibration Accuracy
+
+For these figures, it is important to mind the scale of the y-axis.
+
+```{r}
+
+calibration_graph(testing_tbl_preds, mortality, preds_mortality, "Yes", quantiles = 10, title = "Mortality")
+
+calibration_graph(testing_tbl_preds, aki, preds_aki, "Yes", quantiles = 10, title = "AKI")
+
+calibration_graph(testing_tbl_preds, any_stroke, preds_any_stroke, "Yes", quantiles = 10, title = "Any Stroke")
+
+calibration_graph(testing_tbl_preds, major_bleeding, preds_major_bleeding, "Yes", quantiles = 10, title = "Major Bleeding")
+
+calibration_graph(testing_tbl_preds, transfusion, preds_transfusion, "Yes", quantiles = 10, title = "Transfusion")
+
+calibration_graph(testing_tbl_preds, nrd, preds_nrd, "Yes", quantiles = 10, title = "NRD")
+
+calibration_graph(testing_tbl_preds, new_cabg, preds_new_cabg, "Yes", quantiles = 10, title = "New CABG")
+
+```
+
+The following provides a sense of the discrepancies between predicted and observed.
+
+```{r}
+
+bind_rows(
+  calibration_table(testing_tbl_preds, mortality, preds_mortality, "Yes", quantiles = 10, title = "Mortality") %>% mutate(Outcome = "Mortality"),
+  calibration_table(testing_tbl_preds, aki, preds_aki, "Yes", quantiles = 10, title = "AKI") %>% mutate(Outcome = "AKI"),
+  calibration_table(testing_tbl_preds, any_stroke, preds_any_stroke, "Yes", quantiles = 10, title = "Any Stroke") %>% mutate(Outcome = "Any Stroke"),
+  calibration_table(testing_tbl_preds, major_bleeding, preds_major_bleeding, "Yes", quantiles = 10, title = "Major Bleeding") %>% mutate(Outcome = "Major Bleeding"),
+  calibration_table(testing_tbl_preds, transfusion, preds_transfusion, "Yes", quantiles = 10, title = "Transfusion") %>% mutate(Outcome = "Transfusion"),
+  calibration_table(testing_tbl_preds, nrd, preds_nrd, "Yes", quantiles = 10, title = "NRD") %>% mutate(Outcome = "NRD")
+  ) %>% 
+  select(
+    Outcome,
+    `Quantile` = qtile,
+    Predicted = risk,
+    Observed = obs,
+  ) %>% 
+  kable()
+
+```
+
+
+## Connect Calibration
+
+```{r}
+
+connected_calibration(testing_tbl_preds, mortality, preds_mortality, "Yes", quantiles = 10, title = "Mortality")
+
+connected_calibration(testing_tbl_preds, aki, preds_aki, "Yes", quantiles = 10, title = "AKI")
+
+connected_calibration(testing_tbl_preds, any_stroke, preds_any_stroke, "Yes", quantiles = 10, title = "Any Stroke")
+
+connected_calibration(testing_tbl_preds, major_bleeding, preds_major_bleeding, "Yes", quantiles = 10, title = "Major Bleeding")
+
+connected_calibration(testing_tbl_preds, transfusion, preds_transfusion, "Yes", quantiles = 10, title = "Transfusion")
+
+connected_calibration(testing_tbl_preds, nrd, preds_nrd, "Yes", quantiles = 10, title = "NRD")
+
+connected_calibration(testing_tbl_preds, new_cabg, preds_new_cabg, "Yes", quantiles = 10, title = "New CABG")
+
+```
+
+
+
