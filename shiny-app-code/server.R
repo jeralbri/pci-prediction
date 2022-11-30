@@ -3,7 +3,7 @@ library(tidyverse)
 library(xgboost)
 library(shinyBS)
 
-load("models/models.rda")
+load("models/models.rda")  # rda file with models not available in this repo.
 source("functions.R")
 
 
