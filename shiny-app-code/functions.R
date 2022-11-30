@@ -20,6 +20,27 @@ gen_text <- function(x, outcome){
 }
 
 
+gen_rev_text <- function(x, outcome){
+  
+  if(x < 0.0004999){
+    glue("More than 999 in 1,000 patients may not { outcome } following PCI while in the hospital.")
+  } else {
+    glue("{1000 - round(x*1000)} in 1,000 patients may not { outcome } following PCI while in the hospital.")
+  } 
+  
+}
+
+
+gen_probs_text <- function(x, outcome){
+  
+  if(x < 0.0004999){
+    glue("{ outcome }: <0.1%")
+  } else {
+    glue("{ outcome }: { round(100*x, 1) }%")
+  } 
+  
+}
+
 gen_graph <- function(x){
   
   probs <- list(`Experience Event` = x,

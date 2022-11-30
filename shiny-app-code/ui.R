@@ -41,7 +41,7 @@ shinyUI(fluidPage(
   add_loading_state(c(".shiny-plot-output", ".shiny-html-output"), 
                     text = "Please wait while content loads...", 
                     svgColor = "steelblue",
-                    timeout = 4000),
+                    timeout = 6000),
   
   hr(),
   
@@ -297,10 +297,20 @@ shinyUI(fluidPage(
                actionButton("resetAll_0", "Reset Values to Defaults")
              ),
              tabPanel(
+               "Mortality",
+               linebreaks(1),
+               h3(textOutput("mort_text")),
+               plotOutput("mort_graph"),
+               h3(textOutput("mort_rev_text")),
+               br(),
+               actionButton("resetAll_6", "Reset Values to Defaults")
+             ),
+             tabPanel(
                "Transfusion",
                linebreaks(1),
                h3(textOutput("trnsf_text")),
                plotOutput("trnsf_graph"),
+               h3(textOutput("trnsf_rev_text")),
                br(),
                actionButton("resetAll_1", "Reset Values to Defaults")
              ),
@@ -309,6 +319,7 @@ shinyUI(fluidPage(
                linebreaks(1),
                h3(textOutput("stroke_text")),
                plotOutput("stroke_graph"),
+               h3(textOutput("stroke_rev_text")),
                br(),
                actionButton("resetAll_2", "Reset Values to Defaults")
              ),
@@ -317,6 +328,7 @@ shinyUI(fluidPage(
                linebreaks(1),
                h3(textOutput("aki_text")),
                plotOutput("aki_graph"),
+               h3(textOutput("aki_rev_text")),
                br(),
                p("*Predictions are based only on patients not on dialysis at the time of PCI."),
                actionButton("resetAll_3", "Reset Values to Defaults")
@@ -326,6 +338,7 @@ shinyUI(fluidPage(
                linebreaks(1),
                h3(textOutput("nrd_text")),
                plotOutput("nrd_graph"),
+               h3(textOutput("nrd_rev_text")),
                br(),
                p("*Predictions are based only on patients not on dialysis at the time of PCI."),
                actionButton("resetAll_4", "Reset Values to Defaults")
@@ -335,16 +348,9 @@ shinyUI(fluidPage(
                linebreaks(1),
                h3(textOutput("majbleed_text")),
                plotOutput("majbleed_graph"),
+               h3(textOutput("majbleed_rev_text")),
                br(),
                actionButton("resetAll_5", "Reset Values to Defaults")
-             ),
-             tabPanel(
-               "Mortality",
-               linebreaks(1),
-               h3(textOutput("mort_text")),
-               plotOutput("mort_graph"),
-               br(),
-               actionButton("resetAll_6", "Reset Values to Defaults")
              )
            )
     )

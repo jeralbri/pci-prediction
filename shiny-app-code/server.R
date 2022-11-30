@@ -252,6 +252,20 @@ shinyServer(function(input, output, session) {
     )
     gen_text(mort_preds(), "not survive")
   })
+  output$mort_rev_text <- renderText({
+    validate(
+      need(input$age, ""),
+      need(input$height, ""),
+      need(input$weight, ""),
+      need(input$systolic, ""),
+      need(input$creat_val, ""),
+      need(input$hdl_val, ""),
+      need(input$total_val, ""),
+      need(input$hgb_val, ""),
+      need(input$lvef_val, "")
+    )
+    gen_rev_text(mort_preds(), "die")
+  })
   output$aki_graph <- renderPlot({
     validate(
       need(input$age, "Please enter an age."),
@@ -280,6 +294,20 @@ shinyServer(function(input, output, session) {
       need(input$lvef_val, "")
     )
     gen_text(aki_preds(), "experience acute kidney injury*")
+  })
+  output$aki_rev_text <- renderText({
+    validate(
+      need(input$age, ""),
+      need(input$height, ""),
+      need(input$weight, ""),
+      need(input$systolic, ""),
+      need(input$creat_val, ""),
+      need(input$hdl_val, ""),
+      need(input$total_val, ""),
+      need(input$hgb_val, ""),
+      need(input$lvef_val, "")
+    )
+    gen_rev_text(aki_preds(), "experience acute kidney injury")
   })
   output$nrd_graph <- renderPlot({
     validate(
@@ -310,6 +338,20 @@ shinyServer(function(input, output, session) {
     )
     gen_text(nrd_preds(), "require dialysis*")
   })
+  output$nrd_rev_text <- renderText({
+    validate(
+      need(input$age, ""),
+      need(input$height, ""),
+      need(input$weight, ""),
+      need(input$systolic, ""),
+      need(input$creat_val, ""),
+      need(input$hdl_val, ""),
+      need(input$total_val, ""),
+      need(input$hgb_val, ""),
+      need(input$lvef_val, "")
+    )
+    gen_rev_text(nrd_preds(), "require dialysis")
+  })
   output$majbleed_graph <- renderPlot({
     validate(
       need(input$age, "Please enter an age."),
@@ -338,6 +380,20 @@ shinyServer(function(input, output, session) {
       need(input$lvef_val, "")
     )
     gen_text(maj_bleed_preds(), "develop major bleeding")
+  })
+  output$majbleed_rev_text <- renderText({
+    validate(
+      need(input$age, ""),
+      need(input$height, ""),
+      need(input$weight, ""),
+      need(input$systolic, ""),
+      need(input$creat_val, ""),
+      need(input$hdl_val, ""),
+      need(input$total_val, ""),
+      need(input$hgb_val, ""),
+      need(input$lvef_val, "")
+    )
+    gen_rev_text(maj_bleed_preds(), "develop major bleeding")
   })
   output$trnsf_graph <- renderPlot({
     validate(
@@ -368,6 +424,20 @@ shinyServer(function(input, output, session) {
     )
     gen_text(trnsf_preds(), "need a transfusion")
   })
+  output$trnsf_rev_text <- renderText({
+    validate(
+      need(input$age, ""),
+      need(input$height, ""),
+      need(input$weight, ""),
+      need(input$systolic, ""),
+      need(input$creat_val, ""),
+      need(input$hdl_val, ""),
+      need(input$total_val, ""),
+      need(input$hgb_val, ""),
+      need(input$lvef_val, "")
+    )
+    gen_rev_text(trnsf_preds(), "need a transfusion")
+  })
   output$stroke_graph <- renderPlot({
     validate(
       need(input$age, "Please enter an age."),
@@ -397,6 +467,20 @@ shinyServer(function(input, output, session) {
     )
     gen_text(stroke_preds(), "experience a stroke")
   })
+  output$stroke_rev_text <- renderText({
+    validate(
+      need(input$age, ""),
+      need(input$height, ""),
+      need(input$weight, ""),
+      need(input$systolic, ""),
+      need(input$creat_val, ""),
+      need(input$hdl_val, ""),
+      need(input$total_val, ""),
+      need(input$hgb_val, ""),
+      need(input$lvef_val, "")
+    )
+    gen_rev_text(stroke_preds(), "experience a stroke")
+  })
   
   output$report <- downloadHandler(
     
@@ -408,12 +492,27 @@ shinyServer(function(input, output, session) {
       file.copy("generate-report.Rmd", tempReport, overwrite = TRUE)
       
       params <- list(
-        rpt_trnsf_text    = gen_text(trnsf_preds(), "need a transfusion"),
-        rpt_stroke_text   = gen_text(stroke_preds(), "experience a stroke"),
-        rpt_aki_text      = gen_text(aki_preds(), "experience acute kidney injury*"),
-        rpt_nrd_text      = gen_text(nrd_preds(), "require dialysis*"),
-        rpt_majbleed_text = gen_text(maj_bleed_preds(), "develop major bleeding"),
-        rpt_mort_text     = gen_text(mort_preds(), "not survive"),
+        rpt_mort_text     = gen_probs_text(mort_preds(), "Mortality"),
+        rpt_trnsf_text    = gen_probs_text(trnsf_preds(), "Transfusion"),
+        rpt_stroke_text   = gen_probs_text(stroke_preds(), "Stroke"),
+        rpt_aki_text      = gen_probs_text(aki_preds(), "Acute Kidney Injury*"),
+        rpt_nrd_text      = gen_probs_text(nrd_preds(), "New Dialysis*"),
+        rpt_majbleed_text = gen_probs_text(maj_bleed_preds(), "Major Bleeding"),
+        
+        rpt_mort_sum_text     = gen_text(mort_preds(), "die"),
+        rpt_trnsf_sum_text    = gen_text(trnsf_preds(), "need a transfusion"),
+        rpt_stroke_sum_text   = gen_text(stroke_preds(), "experience a stroke"),
+        rpt_aki_sum_text      = gen_text(aki_preds(), "experience acute kidney injury"),
+        rpt_nrd_sum_text      = gen_text(nrd_preds(), "require dialysis"),
+        rpt_majbleed_sum_text = gen_text(maj_bleed_preds(), "develop major bleeding"),
+        
+        rpt_mort_rev_text     = gen_rev_text(mort_preds(), "die"),
+        rpt_trnsf_rev_text    = gen_rev_text(trnsf_preds(), "need a transfusion"),
+        rpt_stroke_rev_text   = gen_rev_text(stroke_preds(), "experience a stroke"),
+        rpt_aki_rev_text      = gen_rev_text(aki_preds(), "experience acute kidney injury"),
+        rpt_nrd_rev_text      = gen_rev_text(nrd_preds(), "require dialysis"),
+        rpt_majbleed_rev_text = gen_rev_text(maj_bleed_preds(), "develop major bleeding"),
+        
         rpt_trnsf         = predictions(transfusion, data_tbl()),
         rpt_stroke        = predictions(stroke, data_tbl()),
         rpt_aki           = predictions(aki, data_tbl()),
@@ -432,15 +531,16 @@ shinyServer(function(input, output, session) {
     } 
   ) 
   
+  
   output$htmllist <- reactive({
-    paste("<h4>The rate of outcomes following PCI for similar patients is:</h4>",
+    paste("<h4>Rate of In-Hospital Adverse Events::</h4>",
           "<ul>",
-          "<li>", gen_text(trnsf_preds(), "need a transfusion"),"</li>",
-          "<li>", gen_text(stroke_preds(), "experience a stroke"),"</li>",
-          "<li>", gen_text(aki_preds(), "experience acute kidney injury*"),"</li>",
-          "<li>", gen_text(nrd_preds(), "require dialysis*"),"</li>",
-          "<li>", gen_text(maj_bleed_preds(), "develop major bleeding"),"</li>",
-          "<li>", gen_text(mort_preds(), "not survive"),"</li>",
+          "<li>", gen_probs_text(mort_preds(), "Mortality"),"</li>",
+          "<li>", gen_probs_text(trnsf_preds(), "Transfusion"),"</li>",
+          "<li>", gen_probs_text(stroke_preds(), "Stroke"),"</li>",
+          "<li>", gen_probs_text(aki_preds(), "Acute Kidney Injury*"),"</li>",
+          "<li>", gen_probs_text(nrd_preds(), "New Dialysis*"),"</li>",
+          "<li>", gen_probs_text(maj_bleed_preds(), "Major Bleeding"),"</li>",
           "</ul>",
           p("*Predictions are based only on patients not on dialysis at the time of PCI."))
   })
