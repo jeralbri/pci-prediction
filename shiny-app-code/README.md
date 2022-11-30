@@ -1,0 +1,1 @@
+The code for the Shiny app is contained in this directory. Because caret model objects may contain identifying or proprietary data, the objects needed to run the app are not included here.

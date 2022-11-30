@@ -1,0 +1,140 @@
+---
+title: "Risk Summary"
+output: pdf_document
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+params:
+  rpt_trnsf_text: NA
+  rpt_stroke_text: NA
+  rpt_aki_text: NA
+  rpt_nrd_text: NA
+  rpt_majbleed_text: NA
+  rpt_mort_text: NA
+  rpt_trnsf_sum_text: NA
+  rpt_stroke_sum_text: NA
+  rpt_aki_sum_text: NA
+  rpt_nrd_sum_text: NA
+  rpt_majbleed_sum_text: NA
+  rpt_mort_sum_text: NA
+  rpt_trnsf_rev_text: NA
+  rpt_stroke_rev_text: NA
+  rpt_aki_rev_text: NA
+  rpt_nrd_rev_text: NA
+  rpt_majbleed_rev_text: NA
+  rpt_mort_rev_text: NA
+  rpt_trnsf: NA
+  rpt_stroke: NA
+  rpt_aki: NA
+  rpt_nrd: NA
+  rpt_majbleed: NA
+  rpt_mort: NA
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(personograph)
+
+gen_graph <- function(x){
+  
+  probs <- list(`Experience Event` = x,
+                `Do Not Experience Event` = 1-x)
+  
+  suppressWarnings(
+    personograph(probs, n.icons=1000, draw.legend = F, plot.width=1.0, dimensions=c(20,50), 
+                 colors = list(`Experience Event` = "#B7202E",
+                               `Do Not Experience Event` = "#BBBDC0"))
+  )
+}
+
+
+```
+
+## Summary
+
+The rate of in-hospital adverse events is:
+
+- `r paste(params$rpt_mort_text)`
+- `r paste(params$rpt_trnsf_text)`
+- `r paste(params$rpt_stroke_text)`
+- `r paste(params$rpt_aki_text)`
+- `r paste(params$rpt_nrd_text)`
+- `r paste(params$rpt_majbleed_text)`
+
+*Predictions are based only on patients not on dialysis at the time of PCI.
+
+## Mortality
+
+`r paste(params$rpt_mort_sum_text)`
+
+```{r}
+gen_graph(params$rpt_mort)
+```
+
+`r paste(params$rpt_mort_rev_text)`
+
+\newpage
+
+## Transfusion
+
+`r paste(params$rpt_trnsf_sum_text)`
+
+```{r}
+gen_graph(params$rpt_trnsf)
+#\vspace*{-0.75cm}
+```
+
+`r paste(params$rpt_trnsf_rev_text)`
+
+\newpage
+
+## Stroke
+
+`r paste(params$rpt_stroke_sum_text)`
+
+```{r}
+gen_graph(params$rpt_stroke)
+# \vspace*{-0.75cm}
+```
+
+`r paste(params$rpt_stroke_rev_text)`
+
+\newpage
+
+## Acute Kidney Injury
+
+`r paste(params$rpt_aki_sum_text)`
+
+```{r}
+gen_graph(params$rpt_aki)
+```
+
+`r paste(params$rpt_aki_rev_text)`
+
+*Predictions are based only on patients not on dialysis at the time of PCI.
+
+\newpage
+
+## New Requirement for Dialysis
+
+`r paste(params$rpt_nrd_sum_text)`
+
+```{r}
+gen_graph(params$rpt_nrd)
+```
+
+*Predictions are based only on patients not on dialysis at the time of PCI.
+
+`r paste(params$rpt_nrd_rev_sum_text)`
+
+\newpage
+
+## Major Bleed
+
+`r paste(params$rpt_majbleed_sum_text)`
+
+```{r}
+gen_graph(params$rpt_majbleed)
+```
+
+`r paste(params$rpt_majbleed_rev_text)`
+
